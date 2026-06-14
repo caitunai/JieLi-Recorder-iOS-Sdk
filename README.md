@@ -1,4 +1,4 @@
-# JieLiSdkRecorder 0.0.3
+# JieLiSdkRecorder 0.0.4
 
 Binary Swift Package distribution of JieLiSdkRecorder.
 
@@ -8,7 +8,7 @@ Add the following package URL in Xcode:
 
 `https://github.com/caitunai/JieLi-Recorder-iOS-Sdk.git`
 
-Select version `0.0.3` or later and add the `JieLiSdkRecorder` product
+Select version `0.0.4` or later and add the `JieLiSdkRecorder` product
 to the application target.
 
 The package includes the required dynamic JieLi and JLAudioUnitKit binary
