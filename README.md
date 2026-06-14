@@ -1,4 +1,4 @@
-# JieLiSdkRecorder 0.0.2
+# JieLiSdkRecorder 0.0.3
 
 Binary Swift Package distribution of JieLiSdkRecorder.
 
@@ -8,11 +8,12 @@ Add the following package URL in Xcode:
 
 `https://github.com/caitunai/JieLi-Recorder-iOS-Sdk.git`
 
-Select version `0.0.2` or later and add the `JieLiSdkRecorder` product
+Select version `0.0.3` or later and add the `JieLiSdkRecorder` product
 to the application target.
 
-The package includes the required JieLi, JLAudioUnitKit, and PNote binary
-targets, and declares HuanGeSdk as a Swift Package dependency.
+The package includes the required dynamic JieLi and JLAudioUnitKit binary
+targets. Static HuanGeSdk and PNote dependencies are embedded in
+`JieLiSdkRecorder.framework` to avoid duplicate Objective-C classes.
 
 ## Platform support
 
