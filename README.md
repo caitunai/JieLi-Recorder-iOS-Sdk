@@ -30,9 +30,7 @@ https://github.com/caitunai/JieLi-Recorder-iOS-Sdk.git
 ```
 
 The distributed `JieLiSdkRecorder.xcframework` is a dynamic framework.
-HuanGeSdk and PNote are statically embedded implementation dependencies and
-must not be added separately to the application target. The package provides
-and embeds the required dynamic JieLi and JLAudioUnitKit frameworks.
+The package provides and embeds the required dynamic JieLi and JLAudioUnitKit frameworks.
 
 ### 1.2 Framework Embedding
 
@@ -53,7 +51,6 @@ If `-ObjC` is missing, category-based methods or properties from bundled Objecti
 ## 2. Integration Requirements
 
 - Swift 6.2 or later. The package manifest currently uses Swift tools 6.3.
-- iOS 16.0 or later. The bundled HuanGeSdk binary must also be built with an iOS 16.0 deployment target.
 - Import the SDK module in files that use it:
 
 ```swift

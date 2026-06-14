@@ -2,8 +2,7 @@
 
 [English Documentation](../README.md)
 
-JieLiSdkRecorder 是面向录音类蓝牙设备的 Swift SDK，统一封装了杰理、PNote
-和 HuanGe 设备的扫描、连接、录音、文件与 OTA 操作。
+JieLiSdkRecorder 是面向录音类蓝牙设备的 Swift SDK，统一封装了杰理等平台设备的扫描、连接、录音、文件与 OTA 操作。
 
 ## 1. 支持能力
 
@@ -48,9 +47,7 @@ https://github.com/caitunai/JieLi-Recorder-iOS-Sdk.git
 
 选择 `JieLiSdkRecorder` Product 并添加到应用 Target。
 
-`JieLiSdkRecorder.xcframework` 是动态 Framework。HuanGeSdk 和 PNote
-已经作为内部静态依赖嵌入，应用不能再次单独添加或依赖这两个库，否则可能产生
-Objective-C 类重复实现和运行时崩溃。
+`JieLiSdkRecorder.xcframework` 是动态 Framework。
 
 在需要使用 SDK 的 Swift 文件中导入：
 
@@ -361,19 +358,6 @@ BLEErrorCode.queryStorageSizeFailed
 7. 不再使用设备时主动断开连接。
 
 ## 17. 常见问题
-
-### 为什么应用不能直接 `import HuanGeSdk` 或 `import PNote`？
-
-HuanGeSdk 和 PNote 是 JieLiSdkRecorder 的内部静态实现依赖，不属于公开 API。
-干净的应用工程中直接导入它们应提示 `No such module`。
-
-如果旧版本中曾直接依赖这些库，请重置 Swift Package 缓存并删除对应项目的
-DerivedData，避免旧模块继续出现在 Xcode 搜索路径中。
-
-### 为什么出现 Objective-C 类重复实现警告？
-
-通常是因为应用又单独链接了已经静态嵌入 JieLiSdkRecorder 的 HuanGeSdk 或
-PNote。请移除应用中的重复依赖，然后清理 DerivedData 并重新编译。
 
 ### 为什么模拟器无法运行？
 
