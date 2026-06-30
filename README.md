@@ -128,6 +128,7 @@ Common callbacks include:
 - `onStorageSizeUpdate(_:available:total:)`
 - `onRecordFilesCountUpdate(_:fileCount:)`
 - `onKeyTouchBehaviorUpdate(_:isSuccess:errorMessage:)`
+- `onKeyTouchReceived(_:keyTouchBehavior:)`
 - `onKeyTouchEmitted(_:isSuccess:)`
 - `onOTAUpdate(_:event:)`
 - `onUpgradeUnfinished(_:)`
@@ -639,7 +640,32 @@ Callback:
 func onKeyTouchBehaviorUpdate(_ device: BLEDevice, isSuccess: Bool, errorMessage: String)
 ```
 
-### 15.3 Simulate a Key / Touch Trigger
+### 15.3 Query Key / Touch Behavior
+
+Use `queryKeyTouchBehavior(_:)` to read the current key / touch behavior configuration from a connected device.
+
+```swift
+manager.queryKeyTouchBehavior(device)
+```
+
+If you have already selected the current device, you can also use:
+
+```swift
+manager.queryKeyTouchBehavior()
+```
+
+The query result is delivered through `BLECallback`. One device may return multiple behavior records, so this callback may be invoked more than once for a single query.
+
+```swift
+func onKeyTouchReceived(_ device: BLEDevice, keyTouchBehavior: BLEKeyTouchBehavior) {
+    let key = BLEKeyTouchBehavior.displayNameForKey(keyTouchBehavior.key)
+    let event = BLEKeyTouchBehavior.displayNameForEvent(keyTouchBehavior.event)
+    let behavior = BLEKeyTouchBehavior.displayNameForBehavior(keyTouchBehavior.behavior)
+    print("Current key/touch behavior:", key, event, behavior)
+}
+```
+
+### 15.4 Simulate a Key / Touch Trigger
 
 ```swift
 manager.emitKeyTouchBehaviorEvent(device, keyTouchBehavior: behavior)
@@ -651,7 +677,7 @@ Callback:
 func onKeyTouchEmitted(_ device: BLEDevice, isSuccess: Bool)
 ```
 
-### 15.4 Display Text Helper Methods
+### 15.5 Display Text Helper Methods
 
 If you need Chinese display names in the UI, you can directly use:
 
