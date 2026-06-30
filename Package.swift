@@ -31,38 +31,38 @@ let package = Package(
         ),
         .binaryTarget(
             name: "JieLiSdkRecorder",
-            url: "https://github.com/caitunai/JieLi-Recorder-iOS-Sdk/releases/download/v1.0.0/JieLiSdkRecorder-1.0.0.xcframework.zip",
-            checksum: "e067d037a0e7f0f4f95ec35df491057855d216459b90523a5a774579ccaf3f79"
+            url: "https://github.com/caitunai/JieLi-Recorder-iOS-Sdk/releases/download/v1.0.1/JieLiSdkRecorder-1.0.1.xcframework.zip",
+            checksum: "ff9c33918ea9273dd9dc67a016e6f3e34490714d9ddba7faf2335dcf289da00c"
         ),
         .binaryTarget(
             name: "JL_AdvParse",
-            url: "https://github.com/caitunai/JieLi-Recorder-iOS-Sdk/releases/download/v1.0.0/JL_AdvParse-1.0.0.xcframework.zip",
-            checksum: "f92daa4d392fd5db292d17a335febece57f089132c0cb3c8f70be9be8bc6c89f"
+            url: "https://github.com/caitunai/JieLi-Recorder-iOS-Sdk/releases/download/v1.0.1/JL_AdvParse-1.0.1.xcframework.zip",
+            checksum: "021ba31ae20214c609f2bee85c7b6cce219d96905f7b792a050ea089f1cedc3c"
         ),
         .binaryTarget(
             name: "JL_HashPair",
-            url: "https://github.com/caitunai/JieLi-Recorder-iOS-Sdk/releases/download/v1.0.0/JL_HashPair-1.0.0.xcframework.zip",
-            checksum: "5023d85a94ba94ddf87c6ca6aaa2015389c44c5eb1dc42a6e45c8f9f8de3970f"
+            url: "https://github.com/caitunai/JieLi-Recorder-iOS-Sdk/releases/download/v1.0.1/JL_HashPair-1.0.1.xcframework.zip",
+            checksum: "625c3cc7044b5411521206fa359d11d58ba99fdc8eb41116545ed040cdb41121"
         ),
         .binaryTarget(
             name: "JLLogHelper",
-            url: "https://github.com/caitunai/JieLi-Recorder-iOS-Sdk/releases/download/v1.0.0/JLLogHelper-1.0.0.xcframework.zip",
-            checksum: "0c879a095f198a16cdc9b1d81631733b3668d90bc9652b1e13173810011effa5"
+            url: "https://github.com/caitunai/JieLi-Recorder-iOS-Sdk/releases/download/v1.0.1/JLLogHelper-1.0.1.xcframework.zip",
+            checksum: "9a5951712fe33ec4d0a6a167bdfe50b9b86b0067c123cf634d19e1898cd99022"
         ),
         .binaryTarget(
             name: "JL_BLEKit",
-            url: "https://github.com/caitunai/JieLi-Recorder-iOS-Sdk/releases/download/v1.0.0/JL_BLEKit-1.0.0.xcframework.zip",
-            checksum: "ab3887d7a8e7c4e1dc6b2a26d9c1c5938118fe7c992a2c3715c4cdc09439f9ee"
+            url: "https://github.com/caitunai/JieLi-Recorder-iOS-Sdk/releases/download/v1.0.1/JL_BLEKit-1.0.1.xcframework.zip",
+            checksum: "1307cda52aad95b7747d41d58241f246b02bbc25ee92cec646038e6dbb1cf137"
         ),
         .binaryTarget(
             name: "JL_OTALib",
-            url: "https://github.com/caitunai/JieLi-Recorder-iOS-Sdk/releases/download/v1.0.0/JL_OTALib-1.0.0.xcframework.zip",
-            checksum: "735864c2420df4b72e9dc98e3a27c62c9a92303bb59930c56f89ee3b2aef8608"
+            url: "https://github.com/caitunai/JieLi-Recorder-iOS-Sdk/releases/download/v1.0.1/JL_OTALib-1.0.1.xcframework.zip",
+            checksum: "5322a695d3cc78a86a86f38845f60cc82ab93cd6368733b42d9f661ef67f89f8"
         ),
         .binaryTarget(
             name: "JLAudioUnitKit",
-            url: "https://github.com/caitunai/JieLi-Recorder-iOS-Sdk/releases/download/v1.0.0/JLAudioUnitKit-1.0.0.xcframework.zip",
-            checksum: "4bf311d8931717581540ad122cd756c090d976b2361c7893d3ad4f829673d340"
+            url: "https://github.com/caitunai/JieLi-Recorder-iOS-Sdk/releases/download/v1.0.1/JLAudioUnitKit-1.0.1.xcframework.zip",
+            checksum: "0ed32138d4c3579ea7f7675998d6cb70ae9f000dd618110fd026718da52d5c11"
         ),
     ],
     swiftLanguageModes: [.v6]
