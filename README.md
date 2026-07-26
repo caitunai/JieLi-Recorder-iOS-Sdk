@@ -15,6 +15,7 @@
 - Key / touch behavior configuration
 - Software-triggered key / touch event simulation
 - OTA upgrade and cancellation
+- Device binding and authentication (HuanGe only)
 
 ## 1. Important Xcode Setup
 
@@ -132,6 +133,7 @@ Common callbacks include:
 - `onKeyTouchEmitted(_:isSuccess:)`
 - `onOTAUpdate(_:event:)`
 - `onUpgradeUnfinished(_:)`
+- `onDeviceBindingStateChanged(_:state:)`
 - `onError(_:errorCode:)`
 
 ## 5. Initialize `BLEManager`
@@ -741,7 +743,158 @@ It is recommended that the OTA UI covers at least these states:
 
 If `onUpgradeUnfinished(_:)` is received, it means the device reports an unfinished upgrade task. The app layer can notify the user and continue the OTA flow again if needed.
 
-## 17. Error Handling
+## 17. Device Binding and Authentication (HuanGe Only)
+
+The SDK supports device binding and identity verification for HuanGe devices. This feature allows you to bind a device with a 16-byte key and later verify the device's identity using the same key.
+
+**Important**: This feature is only available for HuanGe devices. Calling these APIs on JieLi or PNote devices will throw `BLEDeviceBindingError.unsupportedDeviceSource`.
+
+### 17.1 Generate a Binding Key
+
+The binding key must be exactly 16 bytes. Use `SecRandomCopyBytes` to generate a secure random key:
+
+```swift
+import Security
+
+func generateBindingKey() -> Data? {
+    var key = Data(count: 16)
+    let result = key.withUnsafeMutableBytes { bytes in
+        SecRandomCopyBytes(kSecRandomDefault, 16, bytes.bindMemory(to: UInt8.self).baseAddress!)
+    }
+    return result == errSecSuccess ? key : nil
+}
+```
+
+### 17.2 Query Device Binding State
+
+Check whether a device is already bound:
+
+```swift
+let state = try await manager.getDeviceBindingState(device)
+// Returns: .unbound, .bound, or .unknown
+```
+
+Possible values for `BLEDeviceBindingState`:
+
+- `.unbound`: Device is not bound
+- `.bound`: Device is already bound
+- `.unknown`: Unable to determine binding state
+
+Callback:
+
+```swift
+func onDeviceBindingStateChanged(_ device: BLEDevice, state: BLEDeviceBindingState)
+```
+
+### 17.3 Bind or Verify Device
+
+Bind a device for the first time, or verify an already-bound device:
+
+```swift
+let result = try await manager.bindOrVerifyDevice(device, using: key)
+// Returns: .bound (first-time bind) or .verified (identity verified)
+```
+
+Possible values for `BLEDeviceBindingResult`:
+
+- `.bound`: Device was successfully bound for the first time
+- `.verified`: Device identity was successfully verified
+
+### 17.4 Verify Device Binding Only
+
+Verify an already-bound device without attempting to bind:
+
+```swift
+try await manager.verifyDeviceBinding(device, using: key)
+```
+
+This will throw an error if the device is not bound or if the provided key is incorrect.
+
+### 17.5 Key Storage Best Practices
+
+The binding key must be securely stored by your app. Recommended storage locations:
+
+- **Keychain**: Most secure option for production apps
+- **App sandbox directory**: Suitable for development/Demo (e.g., `NSTemporaryDirectory` or `FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)`)
+
+**Important**: Never hardcode binding keys or store them in UserDefaults. If the key is lost, you will not be able to verify the device identity.
+
+### 17.6 Error Handling
+
+Device binding errors are returned as `BLEDeviceBindingError`:
+
+- `.unsupportedDeviceSource(BLEDeviceSource)`: Device source does not support binding (JieLi/PNote)
+- `.invalidBindingKeyLength`: Provided key is not exactly 16 bytes
+- `.deviceNotBound`: Attempted to verify a device that has not been bound
+- `.verificationFailed`: Provided key does not match the bound key
+- `.notConnected`: Device is not connected
+- `.systemError(String)`: Other system-level errors
+
+### 17.7 Complete Binding Flow Example
+
+```swift
+import Foundation
+import JieLiSdkRecorder
+import Security
+
+final class DeviceBindingManager {
+    private let manager = BLEManager()
+    private var bindingKeys: [String: Data] = [:]
+
+    /// Generate a secure 16-byte binding key
+    func generateBindingKey() -> Data? {
+        var key = Data(count: 16)
+        let result = key.withUnsafeMutableBytes { bytes in
+            SecRandomCopyBytes(kSecRandomDefault, 16, bytes.bindMemory(to: UInt8.self).baseAddress!)
+        }
+        return result == errSecSuccess ? key : nil
+    }
+
+    /// Check if device is bound
+    func checkBindingState(for device: BLEDevice) async throws -> BLEDeviceBindingState {
+        return try await manager.getDeviceBindingState(device)
+    }
+
+    /// Bind or verify device
+    func bindOrVerify(_ device: BLEDevice) async throws -> BLEDeviceBindingResult {
+        // Retrieve or generate binding key
+        let key: Data
+        if let existingKey = bindingKeys[device.id] {
+            key = existingKey
+        } else {
+            guard let newKey = generateBindingKey() else {
+                throw BLEDeviceBindingError.systemError("Failed to generate binding key")
+            }
+            bindingKeys[device.id] = newKey
+            key = newKey
+        }
+
+        let result = try await manager.bindOrVerifyDevice(device, using: key)
+
+        // Store key persistently (e.g., Keychain) after successful bind
+        if result == .bound {
+            saveBindingKey(key, for: device.id)
+        }
+
+        return result
+    }
+
+    /// Verify device with existing key
+    func verifyDevice(_ device: BLEDevice) async throws {
+        guard let key = bindingKeys[device.id] else {
+            throw BLEDeviceBindingError.systemError("No binding key found for device")
+        }
+        try await manager.verifyDeviceBinding(device, using: key)
+    }
+
+    private func saveBindingKey(_ key: Data, for deviceId: String) {
+        // Implement Keychain storage in production
+        // This is a simplified example
+    }
+}
+```
+
+## 18. Error Handling
 
 General business errors are returned through:
 
@@ -762,6 +915,9 @@ Common error constants:
 - `BLEErrorCode.opusToOggFailed`
 - `BLEErrorCode.keyTouchBehaviorUpdateFailed`
 - `BLEErrorCode.fileDownloadFailed`
+- `BLEErrorCode.bindingInvalidKeyLength`
+- `BLEErrorCode.bindingDeviceNotBound`
+- `BLEErrorCode.bindingVerificationFailed`
 
 Common methods:
 
@@ -769,7 +925,7 @@ Common methods:
 - `errorCode.getMessage()`
 - `BLEErrorCode.getByCode(_:)`
 
-## 18. Recommended Integration Flow
+## 19. Recommended Integration Flow
 
 A complete business flow usually looks like this:
 
@@ -783,7 +939,7 @@ A complete business flow usually looks like this:
 8. Execute business capabilities such as time sync, recording control, file operations, and OTA
 9. Call `disconnect(_:)` when done
 
-## 19. Minimal Integration Example
+## 20. Minimal Integration Example
 
 ```swift
 import Foundation
@@ -857,7 +1013,7 @@ final class DemoRecorderService: BLECallback {
 }
 ```
 
-## 20. SDK Capabilities Already Covered
+## 21. SDK Capabilities Already Covered
 
 The SDK currently demonstrates the following capabilities:
 
@@ -878,3 +1034,5 @@ The SDK currently demonstrates the following capabilities:
 - OTA file selection
 - OTA start
 - OTA cancel
+- Device binding state query (HuanGe only)
+- Device binding/verification (HuanGe only)

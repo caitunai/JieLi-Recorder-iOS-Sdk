@@ -17,6 +17,7 @@ JieLiSdkRecorder 是面向录音类蓝牙设备的 Swift SDK，统一封装了�
 - 按键与触摸行为查询
 - 软件模拟按键与触摸事件
 - OTA 升级与取消
+- 设备绑定与身份验证（仅 HuanGe）
 
 ## 2. 环境要求
 
@@ -81,6 +82,10 @@ final class RecorderCallbackProxy: BLECallback {
 
     func onConnectionChange(_ device: BLEDevice, status: ConnectionCode) {
         print("连接状态：", device.name, status.getMessage())
+    }
+
+    func onDeviceBindingStateChanged(_ device: BLEDevice, state: BLEDeviceBindingState) {
+        print("设备绑定状态变化：", device.name, state.rawValue)
     }
 
     func onError(_ device: BLEDevice, errorCode: BLEErrorCode) {
@@ -423,7 +428,158 @@ func onKeyTouchEmitted(_ device: BLEDevice, isSuccess: Bool) {
 - `BLEKeyTouchBehavior.displayNameForEvent(_:)`
 - `BLEKeyTouchBehavior.displayNameForBehavior(_:)`
 
-## 16. 错误处理
+## 16. 设备绑定与身份验证（仅 HuanGe）
+
+SDK 支持 HuanGe 设备的绑定和身份验证功能。通过此功能，可以使用 16 字节密钥将设备与应用绑定，后续通过同一密钥验证设备身份。
+
+**重要说明**：此功能仅 HuanGe 设备支持。在 JieLi 或 PNote 设备上调用会抛出 `BLEDeviceBindingError.unsupportedDeviceSource` 错误。
+
+### 16.1 生成绑定密钥
+
+绑定密钥必须为 16 字节。使用 `SecRandomCopyBytes` 生成安全的随机密钥：
+
+```swift
+import Security
+
+func generateBindingKey() -> Data? {
+    var key = Data(count: 16)
+    let result = key.withUnsafeMutableBytes { bytes in
+        SecRandomCopyBytes(kSecRandomDefault, 16, bytes.bindMemory(to: UInt8.self).baseAddress!)
+    }
+    return result == errSecSuccess ? key : nil
+}
+```
+
+### 16.2 查询设备绑定状态
+
+检查设备是否已绑定：
+
+```swift
+let state = try await manager.getDeviceBindingState(device)
+// 返回值: .unbound（未绑定）、.bound（已绑定）或 .unknown（未知）
+```
+
+`BLEDeviceBindingState` 的可能值：
+
+- `.unbound`：设备未绑定
+- `.bound`：设备已绑定
+- `.unknown`：无法确定绑定状态
+
+回调方法：
+
+```swift
+func onDeviceBindingStateChanged(_ device: BLEDevice, state: BLEDeviceBindingState)
+```
+
+### 16.3 绑定或验证设备
+
+首次绑定设备，或验证已绑定设备：
+
+```swift
+let result = try await manager.bindOrVerifyDevice(device, using: key)
+// 返回值: .bound（首次绑定成功）或 .verified（身份验证成功）
+```
+
+`BLEDeviceBindingResult` 的可能值：
+
+- `.bound`：设备首次绑定成功
+- `.verified`：设备身份验证成功
+
+### 16.4 仅验证设备绑定
+
+仅验证已绑定设备，不尝试绑定：
+
+```swift
+try await manager.verifyDeviceBinding(device, using: key)
+```
+
+如果设备未绑定或密钥不正确，会抛出错误。
+
+### 16.5 密钥存储最佳实践
+
+绑定密钥必须由应用安全存储。推荐存储位置：
+
+- **Keychain**：生产环境最安全的选择
+- **应用沙盒目录**：适合开发/Demo 环境（如 `NSTemporaryDirectory` 或 `FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)`）
+
+**重要提示**：永远不要硬编码密钥或存储在 UserDefaults 中。如果密钥丢失，将无法验证设备身份。
+
+### 16.6 错误处理
+
+设备绑定错误通过 `BLEDeviceBindingError` 返回：
+
+- `.unsupportedDeviceSource(BLEDeviceSource)`：设备源不支持绑定（JieLi/PNote）
+- `.invalidBindingKeyLength`：提供的密钥不是 16 字节
+- `.deviceNotBound`：尝试验证未绑定的设备
+- `.verificationFailed`：提供的密钥与绑定密钥不匹配
+- `.notConnected`：设备未连接
+- `.systemError(String)`：其他系统级错误
+
+### 16.7 完整绑定流程示例
+
+```swift
+import Foundation
+import JieLiSdkRecorder
+import Security
+
+final class DeviceBindingManager {
+    private let manager = BLEManager()
+    private var bindingKeys: [String: Data] = [:]
+
+    /// 生成安全的 16 字节绑定密钥
+    func generateBindingKey() -> Data? {
+        var key = Data(count: 16)
+        let result = key.withUnsafeMutableBytes { bytes in
+            SecRandomCopyBytes(kSecRandomDefault, 16, bytes.bindMemory(to: UInt8.self).baseAddress!)
+        }
+        return result == errSecSuccess ? key : nil
+    }
+
+    /// 检查设备是否已绑定
+    func checkBindingState(for device: BLEDevice) async throws -> BLEDeviceBindingState {
+        return try await manager.getDeviceBindingState(device)
+    }
+
+    /// 绑定或验证设备
+    func bindOrVerify(_ device: BLEDevice) async throws -> BLEDeviceBindingResult {
+        // 获取或生成绑定密钥
+        let key: Data
+        if let existingKey = bindingKeys[device.id] {
+            key = existingKey
+        } else {
+            guard let newKey = generateBindingKey() else {
+                throw BLEDeviceBindingError.systemError("Failed to generate binding key")
+            }
+            bindingKeys[device.id] = newKey
+            key = newKey
+        }
+
+        let result = try await manager.bindOrVerifyDevice(device, using: key)
+
+        // 绑定成功后持久化存储密钥（如 Keychain）
+        if result == .bound {
+            saveBindingKey(key, for: device.id)
+        }
+
+        return result
+    }
+
+    /// 使用已有密钥验证设备
+    func verifyDevice(_ device: BLEDevice) async throws {
+        guard let key = bindingKeys[device.id] else {
+            throw BLEDeviceBindingError.systemError("No binding key found for device")
+        }
+        try await manager.verifyDeviceBinding(device, using: key)
+    }
+
+    private func saveBindingKey(_ key: Data, for deviceId: String) {
+        // 生产环境实现 Keychain 存储
+        // 此处为简化示例
+    }
+}
+```
+
+## 17. 错误处理
 
 统一通过 `onError(_:errorCode:)` 接收 SDK 错误：
 
@@ -440,7 +596,7 @@ func onError(_ device: BLEDevice, errorCode: BLEErrorCode) {
 BLEErrorCode.queryStorageSizeFailed
 ```
 
-## 17. 推荐接入流程
+## 18. 推荐接入流程
 
 1. 创建并长期持有 `BLEManager`。
 2. 创建 `BLECallback` 实现并注册到 Manager。
@@ -450,7 +606,7 @@ BLEErrorCode.queryStorageSizeFailed
 6. 在页面或业务对象销毁时注销回调。
 7. 不再使用设备时主动断开连接。
 
-## 18. 常见问题
+## 19. 常见问题
 
 ### 为什么模拟器无法运行？
 
