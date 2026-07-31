@@ -580,6 +580,13 @@ Recommended handling:
 - `.finish`: use `event.path` for playback, sharing, or export
 - `.error`: prioritize displaying `event.errorMsg`
 
+### 14.4 Cancel Downloading
+You can cancel the downloading session with:
+```swift
+public func cancelDownloadFile(_ device: BLEDevice)    
+```
+this is only work for HuanGe Device.
+
 ## 15. Key / Touch Configuration
 
 The SDK supports configuring key / touch behavior on the device and also supports software-triggering the corresponding event.

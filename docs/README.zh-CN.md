@@ -309,6 +309,13 @@ func onFileDownloadUpdate(_ device: BLEDevice, event: BLEFileDownloadEvent) {
 
 下载完成事件仅在原始 Opus 数据完成 Ogg 封装并写入磁盘后触发。
 
+### 13.1 放弃/取消下载
+你可以使用下面的方法取消和放弃下载:
+```swift
+public func cancelDownloadFile(_ device: BLEDevice)    
+```
+此方法仅对 HuanGe 类型的设备有效。
+
 ## 14. OTA 升级
 
 读取固件数据并开始升级：
