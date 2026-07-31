@@ -291,7 +291,7 @@ manager.deleteFiles(device, filenames: ["REC0001.OPUS", "REC0002.OPUS"])
 下载文件：
 
 ```swift
-manager.downloadFile(device, filename: "REC0001.OPUS")
+manager.downloadFile(device, filename: "REC0001.OPUS", resumeFromOffset: 1314)
 ```
 
 文件操作进度和结果通过以下回调返回：

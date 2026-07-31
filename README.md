@@ -479,6 +479,8 @@ func onFilesRetrieved(_ files: [BLEFile])
 Current primary field in `BLEFile`:
 
 - `name`
+- `size`
+- `timestamp`
 
 Recommended UI-layer handling:
 
@@ -526,7 +528,7 @@ let outputURL = FileManager.default
     .urls(for: .documentDirectory, in: .userDomainMask)[0]
     .appendingPathComponent("record_001.opus")
 
-manager.downloadFile(device, filename: "REC0001.OPUS", outputURL: outputURL)
+manager.downloadFile(device, filename: "REC0001.OPUS", outputURL: outputURL, resumeFromOffset: 1314)
 ```
 
 Notes:
