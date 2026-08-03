@@ -12,7 +12,8 @@ JieLiSdkRecorder 是面向录音类蓝牙设备的 Swift SDK，统一封装了�
 - 实时音频 PCM 数据回调
 - 存储空间查询
 - 录音文件数量和文件列表查询
-- 录音文件删除、下载与 Ogg Opus 封装
+- 录音文件删除、Opus 转 Ogg 下载和原始文件下载
+- 原始文件断点续传
 - 按键与触摸行为配置
 - 按键与触摸行为查询
 - 软件模拟按键与触摸事件
@@ -288,11 +289,110 @@ func onFilesRetrieved(_ files: [BLEFile]) {
 manager.deleteFiles(device, filenames: ["REC0001.OPUS", "REC0002.OPUS"])
 ```
 
-下载文件：
+SDK 提供两种相互独立的下载模式，JieLi、PNote 和 HuanGe 设备使用相同的公开接口：
+
+- `downloadFile`：接收设备的 raw Opus 数据并封装为 Ogg 文件，不支持断点续传。
+- `downloadRawFile`：不进行 Opus 解码或 Ogg 转换，直接把接收到的源文件字节写入磁盘，支持断点续传，也可用于普通非音频文件。
+
+### 13.1 下载 Opus 并转为 Ogg
+
+建议为输出文件使用 `.ogg` 扩展名：
 
 ```swift
-manager.downloadFile(device, filename: "REC0001.OPUS", resumeFromOffset: 1314)
+let outputURL = FileManager.default
+    .urls(for: .documentDirectory, in: .userDomainMask)[0]
+    .appendingPathComponent("record_001.ogg")
+
+manager.downloadFile(
+    device,
+    filename: "REC0001.OPUS",
+    outputURL: outputURL
+)
 ```
+
+`downloadFile` 的最终文件内容是 Ogg 封装的 Opus。此模式必须从偏移量 `0` 开始，传入非零
+`resumeFromOffset` 会返回下载错误。使用默认缓存路径时可调用：
+
+```swift
+manager.downloadFile(device, filename: "REC0001.OPUS")
+```
+
+默认缓存目录为 `Caches/jieli_sdk_download/<filename>`。
+
+### 13.2 下载原始文件
+
+需要保存设备返回的原始文件字节时，使用 `downloadRawFile`：
+
+```swift
+let rawOutputURL = FileManager.default
+    .urls(for: .documentDirectory, in: .userDomainMask)[0]
+    .appendingPathComponent("REC0001.OPUS")
+
+manager.downloadRawFile(
+    device,
+    filename: "REC0001.OPUS",
+    outputURL: rawOutputURL
+)
+```
+
+该模式不会解码 Opus，也不会创建 Ogg 容器，输出内容与接收到的源文件流一致。
+
+### 13.3 原始文件断点续传
+
+`resumeFromOffset` 表示源文件的绝对字节偏移量。本地目标文件必须至少包含该偏移量指定的
+字节数。通常可读取本地部分文件的大小作为续传偏移量：
+
+```swift
+let existingBytes: UInt64
+if FileManager.default.fileExists(atPath: rawOutputURL.path) {
+    let attributes = try FileManager.default.attributesOfItem(atPath: rawOutputURL.path)
+    existingBytes = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+} else {
+    existingBytes = 0
+}
+
+guard existingBytes <= UInt64(UInt32.max) else {
+    throw CocoaError(.fileReadTooLarge)
+}
+let resumeOffset = UInt32(existingBytes)
+
+manager.downloadRawFile(
+    device,
+    filename: "REC0001.OPUS",
+    outputURL: rawOutputURL,
+    resumeFromOffset: resumeOffset
+)
+```
+
+断点续传规则：
+
+- 传入 `0` 会覆盖现有目标文件并从头下载。
+- SDK 保留 `resumeFromOffset` 之前的文件内容，并截断其后的旧数据，再追加新接收的数据。
+- 偏移量超过本地文件大小或设备端源文件大小时，会返回 `.error` 事件。
+- 本地文件已经完整时，SDK 会直接在本地完成，不会再次启动 BLE 文件传输。
+- 原始文件下载被取消或因传输错误中断时，会保留部分文件；再次调用时可使用其文件大小续传。
+
+不指定 `outputURL` 时，文件写入默认缓存目录：
+
+```swift
+manager.downloadRawFile(
+    device,
+    filename: "REC0001.OPUS",
+    resumeFromOffset: resumeOffset
+)
+```
+
+使用默认路径重载进行续传时，应从该缓存目录中的目标文件计算 `resumeOffset`，而不是使用
+`rawOutputURL` 的文件大小。
+
+如果业务已经通过兼容模式选择了当前设备，也可以使用不带 `device` 参数的重载：
+
+```swift
+manager.downloadRawFile("REC0001.OPUS", outputURL: rawOutputURL, resumeFromOffset: resumeOffset)
+manager.downloadRawFile("REC0001.OPUS", resumeFromOffset: resumeOffset)
+```
+
+### 13.4 下载进度与结果
 
 文件操作进度和结果通过以下回调返回：
 
@@ -307,14 +407,28 @@ func onFileDownloadUpdate(_ device: BLEDevice, event: BLEFileDownloadEvent) {
 }
 ```
 
-下载完成事件仅在原始 Opus 数据完成 Ogg 封装并写入磁盘后触发。
+`BLEFileDownloadEvent` 中常用字段：
 
-### 13.1 放弃/取消下载
-你可以使用下面的方法取消和放弃下载:
+- `progress`：下载进度百分比。
+- `bytesCount`：已经写入的源文件总字节数；断点续传时包含本地已保留的前缀。
+- `packages`：本次会话接收的数据包数量。
+- `duration`：本次下载经过的时间。
+- `path`：最终文件、下载中的文件或可续传部分文件的路径。
+- `errorCode`、`errorMsg`：下载失败信息。
+
+对于 `downloadFile`，`.finish` 仅在 raw Opus 数据完成 Ogg 封装并写入磁盘后触发；对于
+`downloadRawFile`，`.finish` 仅在原始文件刷新并关闭后触发。
+
+### 13.5 取消下载
+
+以下方法可取消 JieLi、PNote 或 HuanGe 设备当前正在进行的文件下载：
+
 ```swift
-public func cancelDownloadFile(_ device: BLEDevice)    
+manager.cancelDownloadFile(device)
 ```
-此方法仅对 HuanGe 类型的设备有效。
+
+原始文件模式取消后会关闭并保留部分文件，可根据回调中的 `event.path` 和本地文件大小继续
+断点续传。Opus 转 Ogg 模式取消后会移除未完成的转换结果。
 
 ## 14. OTA 升级
 

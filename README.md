@@ -11,7 +11,8 @@
 - Recording file count query
 - Recording file list retrieval
 - Recording file deletion
-- Recording file download and conversion to an Ogg-wrapped Opus file
+- Recording file download as Ogg-wrapped Opus or unmodified source bytes
+- Resumable raw-file download
 - Key / touch behavior configuration
 - Software-triggered key / touch event simulation
 - OTA upgrade and cancellation
@@ -69,7 +70,9 @@ import JieLiSdkRecorder
 
 - `BLEManager.startScan()` clears the current discovered device list and starts a new scan.
 - The SDK includes an internal auto-stop scan policy. If you need to keep scanning, call `continueScan()`.
-- The downloaded file content is `Ogg-wrapped Opus data`, not the original raw stream stored on the device.
+- `downloadFile` converts the received raw Opus stream into an Ogg container; `downloadRawFile`
+  writes the received source bytes without decoding or conversion.
+- Only raw-file downloads support resuming. Opus-to-Ogg downloads must start at offset `0`.
 - `onFileDownloadUpdate(_:event:)` is available only on iOS 16.0 and later.
 - Business events are mainly delivered through `BLECallback`.
 - The SDK supports two calling styles:
@@ -517,27 +520,38 @@ Recommended handling:
 
 ## 14. Download Files
 
-The SDK downloads recording files from the device and writes them locally as `Ogg-wrapped Opus files`.
+The SDK provides two separate download modes:
 
-### 14.1 Download to a Custom Path
+- `downloadFile`: receives the raw Opus stream and writes an Ogg-wrapped Opus file. This mode does
+  not support resuming.
+- `downloadRawFile`: writes the received source bytes directly to disk without Opus decoding or Ogg
+  conversion. This mode supports resuming from an absolute byte offset.
 
-It is recommended that the app layer explicitly provides the output path:
+The same public APIs work with JieLi, PNote, and HuanGe devices.
+
+### 14.1 Download Opus and Convert It to Ogg
+
+It is recommended that the app layer explicitly provides an output URL with an `.ogg` extension:
 
 ```swift
 let outputURL = FileManager.default
     .urls(for: .documentDirectory, in: .userDomainMask)[0]
-    .appendingPathComponent("record_001.opus")
+    .appendingPathComponent("record_001.ogg")
 
-manager.downloadFile(device, filename: "REC0001.OPUS", outputURL: outputURL, resumeFromOffset: 1314)
+manager.downloadFile(
+    device,
+    filename: "REC0001.OPUS",
+    outputURL: outputURL
+)
 ```
 
 Notes:
 
-- The final saved content is Ogg-wrapped Opus
-- The file extension can still be `.opus`
+- The final saved content is Ogg-wrapped Opus, so `.ogg` is the recommended extension.
+- Opus-to-Ogg conversion cannot be resumed. Passing a nonzero `resumeFromOffset` reports an error.
 - In the Demo, the output file is shared directly after a successful download
 
-### 14.2 Download to the Default Cache Path
+To use the default cache path:
 
 ```swift
 manager.downloadFile(device, filename: "REC0001.OPUS")
@@ -547,7 +561,83 @@ Default cache directory:
 
 - `Caches/jieli_sdk_download/<filename>`
 
-### 14.3 Download Callback
+### 14.2 Download the Original File Bytes
+
+Use `downloadRawFile` when the file must be saved exactly as it is received from the device:
+
+```swift
+let rawOutputURL = FileManager.default
+    .urls(for: .documentDirectory, in: .userDomainMask)[0]
+    .appendingPathComponent("REC0001.OPUS")
+
+manager.downloadRawFile(
+    device,
+    filename: "REC0001.OPUS",
+    outputURL: rawOutputURL
+)
+```
+
+This mode does not decode Opus and does not create an Ogg container. It can also be used for
+non-audio files.
+
+### 14.3 Resume a Raw-File Download
+
+`resumeFromOffset` is an absolute source-file byte offset. The existing destination file must contain
+at least that many bytes. A common approach is to resume from the current local file size:
+
+```swift
+let existingBytes: UInt64
+if FileManager.default.fileExists(atPath: rawOutputURL.path) {
+    let attributes = try FileManager.default.attributesOfItem(atPath: rawOutputURL.path)
+    existingBytes = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
+} else {
+    existingBytes = 0
+}
+
+guard existingBytes <= UInt64(UInt32.max) else {
+    throw CocoaError(.fileReadTooLarge)
+}
+let resumeOffset = UInt32(existingBytes)
+
+manager.downloadRawFile(
+    device,
+    filename: "REC0001.OPUS",
+    outputURL: rawOutputURL,
+    resumeFromOffset: resumeOffset
+)
+```
+
+Resume rules:
+
+- Pass `0` to replace the existing destination file and download from the beginning.
+- The SDK preserves exactly the prefix before `resumeFromOffset` and removes any stale bytes after it.
+- An offset beyond the existing local file or remote source file produces an `.error` event.
+- If the local file is already complete, the SDK finishes locally without starting another BLE file
+  transfer.
+- Raw-file cancellation and transport errors keep the partial file. Use its size as the offset for the
+  next `downloadRawFile` call.
+
+The overload without `outputURL` writes to `Caches/jieli_sdk_download/<filename>`:
+
+```swift
+manager.downloadRawFile(
+    device,
+    filename: "REC0001.OPUS",
+    resumeFromOffset: resumeOffset
+)
+```
+
+When resuming with the default-path overload, calculate `resumeOffset` from the file in that cache
+directory rather than from `rawOutputURL`.
+
+After selecting a current device, the compatibility overloads are also available:
+
+```swift
+manager.downloadRawFile("REC0001.OPUS", outputURL: rawOutputURL, resumeFromOffset: resumeOffset)
+manager.downloadRawFile("REC0001.OPUS", resumeFromOffset: resumeOffset)
+```
+
+### 14.4 Download Callback
 
 ```swift
 @available(iOS 16.0, *)
@@ -568,8 +658,8 @@ Common fields in `BLEFileDownloadEvent`:
 - `progress`: download progress percentage
 - `packages`: number of received data packets
 - `duration`: elapsed time
-- `bytesCount`: number of received raw Opus bytes
-- `path`: output file path
+- `bytesCount`: total source bytes written, including the preserved prefix when resuming
+- `path`: final, in-progress, or resumable partial output file path
 - `errorCode`
 - `errorMsg`
 
@@ -578,14 +668,19 @@ Recommended handling:
 - `.begin`: reset the download progress and statistics
 - `.progress`: update the progress bar, byte count, packet count, and duration
 - `.finish`: use `event.path` for playback, sharing, or export
+- `.cancel`: stop the downloading UI; raw mode keeps the partial file at `event.path`
 - `.error`: prioritize displaying `event.errorMsg`
 
-### 14.4 Cancel Downloading
-You can cancel the downloading session with:
+### 14.5 Cancel a Download
+
+Cancel the active download for any supported device type with:
+
 ```swift
-public func cancelDownloadFile(_ device: BLEDevice)    
+manager.cancelDownloadFile(device)
 ```
-this is only work for HuanGe Device.
+
+For raw-file mode, cancellation closes and retains the partial output so it can be resumed later. For
+Opus-to-Ogg mode, an incomplete converted output is removed.
 
 ## 15. Key / Touch Configuration
 
