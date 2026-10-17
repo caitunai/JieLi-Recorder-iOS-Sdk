@@ -18,7 +18,7 @@ JieLiSdkRecorder 是面向录音类蓝牙设备的 Swift SDK，统一封装了�
 - 按键与触摸行为查询
 - 软件模拟按键与触摸事件
 - OTA 升级与取消
-- 设备绑定与身份验证（仅 HuanGe）
+- 设备绑定、身份验证与解除绑定（仅 HuanGe）
 
 ## 2. 环境要求
 
@@ -549,11 +549,15 @@ func onKeyTouchEmitted(_ device: BLEDevice, isSuccess: Bool) {
 - `BLEKeyTouchBehavior.displayNameForEvent(_:)`
 - `BLEKeyTouchBehavior.displayNameForBehavior(_:)`
 
-## 16. 设备绑定与身份验证（仅 HuanGe）
+## 16. 设备绑定、身份验证与解除绑定（仅 HuanGe）
 
 SDK 支持 HuanGe 设备的绑定和身份验证功能。通过此功能，可以使用 16 字节密钥将设备与应用绑定，后续通过同一密钥验证设备身份。
 
-**重要说明**：此功能仅 HuanGe 设备支持。在 JieLi 或 PNote 设备上调用会抛出 `BLEDeviceBindingError.unsupportedDeviceSource` 错误。
+**重要说明**：这些接口支持 `BLEDeviceSource.huanGe`，包括通过 HuanGe 通道连接的 PNote 产品。`.jieLi` 和原生 `.pnote` 通道的设备不支持，会抛出 `BLEDeviceBindingError.unsupportedDeviceSource`。支持范围以 `device.source` 为准，不按设备广播名称判断。
+
+每次 HuanGe 设备连接就绪后，应先使用已保存的 Key 调用 `bindOrVerifyDevice(_:using:)`，再发送普通控制请求。SDK 的自动电量、固件查询已移到绑定或验证成功后执行，避免普通查询排在身份验证之前。
+
+若重开 App 后验证失败，请区分 `.notConnected`（当前未连接）、`.disconnected`（操作期间断连）和 `.bindingVerificationFailed`（身份验证被拒绝）。连接错误本身不能证明 Key 错误。Demo 会显示设备 ID、Key 的 SHA-256 指纹及失败耗时，可对比重启前后的 ID 和指纹，无需提供 Key 原文。已绑定设备缺少本地 Key 时，Demo 会拒绝生成替代 Key；长度异常的 Key 文件也会保留并报错。为兼容已有测试 Key，Demo 仍沿用原缓存路径；正式应用应使用 Keychain 持久、安全地保存 Key。
 
 ### 16.1 生成绑定密钥
 
@@ -577,14 +581,13 @@ func generateBindingKey() -> Data? {
 
 ```swift
 let state = try await manager.getDeviceBindingState(device)
-// 返回值: .unbound（未绑定）、.bound（已绑定）或 .unknown（未知）
+// 返回值: .unbound（未绑定）或 .bound（已绑定）
 ```
 
 `BLEDeviceBindingState` 的可能值：
 
 - `.unbound`：设备未绑定
 - `.bound`：设备已绑定
-- `.unknown`：无法确定绑定状态
 
 回调方法：
 
@@ -629,11 +632,14 @@ try await manager.verifyDeviceBinding(device, using: key)
 
 设备绑定错误通过 `BLEDeviceBindingError` 返回：
 
-- `.unsupportedDeviceSource(BLEDeviceSource)`：设备源不支持绑定（JieLi/PNote）
+- `.unsupportedDeviceSource(BLEDeviceSource)`：设备通道不支持（`.jieLi` 或原生 `.pnote`）
 - `.invalidBindingKeyLength`：提供的密钥不是 16 字节
 - `.deviceNotBound`：尝试验证未绑定的设备
-- `.verificationFailed`：提供的密钥与绑定密钥不匹配
-- `.notConnected`：设备未连接
+- `.bindingKeyRejected`：设备拒绝绑定密钥
+- `.bindingVerificationFailed`：设备绑定身份验证失败
+- `.deviceUnbindingFailed`：设备明确拒绝解除绑定
+- `.notConnected`：当前与指定设备没有有效连接
+- `.disconnected`：绑定操作完成前连接断开
 - `.systemError(String)`：其他系统级错误
 
 ### 16.7 完整绑定流程示例
@@ -699,6 +705,63 @@ final class DeviceBindingManager {
     }
 }
 ```
+
+### 16.8 解除 BLE 外设绑定
+
+**接口可用性**：这是新增的待发布接口。需要使用已公开 `unbindDevice(_:)` 且集成 HuanGe SDK 1.0.4 或更高版本的 JieLiSdkRecorder 二进制发布包；更新文档不会让旧版二进制自动获得此方法。最低 JieLiSdkRecorder 发布版本号将在发布时补充。设备固件须支持 HuanGe 解除绑定指令 20/21。
+
+```swift
+public func unbindDevice(_ device: BLEDevice) async throws
+```
+
+- **参数**：当前已连接且 `source == .huanGe` 的 `BLEDevice`，包括通过该通道连接的 PNote 产品。旧设备快照中的“已连接”状态不能替代与该设备的实际连接。
+- **返回值**：`Void`，仅在收到外设明确的解绑成功应答后正常返回。应用无需传入 Key、NONCE、HMAC 或自行组包。
+- **错误**：抛出 `BLEDeviceBindingError`，同时通过 `onError(_:errorCode:)` 报告错误。
+
+连接就绪并由用户确认操作后，在异步上下文中调用：
+
+```swift
+do {
+    try await manager.unbindDevice(device)
+    print("设备解除绑定成功")
+    // 仅在此时按应用策略保留或删除本地保存的 Key。
+} catch BLEDeviceBindingError.unsupportedDeviceSource(let source) {
+    print("当前通道不支持解除绑定：", source.rawValue)
+} catch BLEDeviceBindingError.deviceUnbindingFailed {
+    print("设备拒绝解除绑定，请保留已保存的 Key")
+} catch BLEDeviceBindingError.notConnected {
+    print("设备当前未连接，请保留 Key")
+} catch BLEDeviceBindingError.disconnected {
+    print("确认前连接断开，请保留 Key")
+} catch {
+    print("尚未确认解除绑定成功：", error.localizedDescription)
+    // 保留 Key；连接就绪后重新查询绑定状态。
+}
+```
+
+成功时还会通过已有的 `BLECallback` 通知绑定状态：
+
+```swift
+func onDeviceBindingStateChanged(_ device: BLEDevice, state: BLEDeviceBindingState) {
+    if state == .unbound {
+        print("设备当前未绑定：", device.name)
+    }
+}
+```
+
+更新 UI 时请切换到 `MainActor`。异步返回和状态回调可能报告同一次成功操作，业务侧应避免重复执行删除 Key 等操作。
+
+| 场景 | 抛出的错误 | `onError` 错误码 |
+| --- | --- | --- |
+| `.jieLi` 或原生 `.pnote` 通道 | `.unsupportedDeviceSource(source)` | `.deviceBindingUnsupported`（1010） |
+| 设备拒绝解绑请求 | `.deviceUnbindingFailed` | `.deviceUnbindingFailed`（1015） |
+| 与指定设备无有效连接 | `.notConnected` | `.systemError`（1），附带详情 |
+| 成功确认前断连 | `.disconnected` | `.systemError`（1），附带详情 |
+| 超时、无效应答或其它底层错误 | `.systemError(message)` | `.systemError`（1），附带详情 |
+
+发送请求不代表解绑成功。失败或结果未知时，应保留已保存的 Key，在连接就绪后调用 `getDeviceBindingState(_:)` 核对状态。此接口不会自动执行身份验证、重新绑定、主动断开连接或删除应用保存的 Key。确认成功后，由应用决定是否保留 Key；需要再次绑定时，显式调用 `bindOrVerifyDevice(_:using:)`。
+
+Demo 的设备绑定区域提供解绑按钮和确认弹窗，解绑过程中禁止重复请求，并保留缓存的测试 Key 供再次绑定使用。按钮仅对已连接的 `.huanGe` 设备开放。请在目标硬件上验证成功、设备拒绝、超时/断连和再次绑定场景。
 
 ## 17. 错误处理
 

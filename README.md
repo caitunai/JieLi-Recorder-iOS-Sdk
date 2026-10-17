@@ -16,7 +16,7 @@
 - Key / touch behavior configuration
 - Software-triggered key / touch event simulation
 - OTA upgrade and cancellation
-- Device binding and authentication (HuanGe only)
+- Device binding, authentication, and unbinding (HuanGe only)
 
 ## 1. Important Xcode Setup
 
@@ -847,11 +847,15 @@ It is recommended that the OTA UI covers at least these states:
 
 If `onUpgradeUnfinished(_:)` is received, it means the device reports an unfinished upgrade task. The app layer can notify the user and continue the OTA flow again if needed.
 
-## 17. Device Binding and Authentication (HuanGe Only)
+## 17. Device Binding, Authentication, and Unbinding (HuanGe Only)
 
 The SDK supports device binding and identity verification for HuanGe devices. This feature allows you to bind a device with a 16-byte key and later verify the device's identity using the same key.
 
-**Important**: This feature is only available for HuanGe devices. Calling these APIs on JieLi or PNote devices will throw `BLEDeviceBindingError.unsupportedDeviceSource`.
+**Important**: These APIs support `BLEDeviceSource.huanGe`, including PNote products connected through the HuanGe stack. Devices using `.jieLi` or the native `.pnote` stack are not supported and throw `BLEDeviceBindingError.unsupportedDeviceSource`. Support is determined by `device.source`, not the advertised device name.
+
+After each HuanGe connection becomes ready, call `bindOrVerifyDevice(_:using:)` with the stored key before issuing ordinary control requests. Automatic battery and firmware queries run after binding or verification succeeds, so they do not precede authentication in the command queue.
+
+If verification fails after reopening the app, distinguish `.notConnected` (no current connection) from `.disconnected` (connection lost during the operation) and `.bindingVerificationFailed` (authentication rejected). A connection error alone does not prove that the key is wrong. The Demo displays the device ID, a SHA-256 key fingerprint, and elapsed failure time; compare the ID and fingerprint before and after reopening without sharing the raw key. If the device is already bound but the local key is missing, the Demo refuses to generate a replacement. Invalid-length key files are preserved and reported as errors. The Demo still uses its original cache path for compatibility; production apps should use Keychain for durable secure storage.
 
 ### 17.1 Generate a Binding Key
 
@@ -875,14 +879,13 @@ Check whether a device is already bound:
 
 ```swift
 let state = try await manager.getDeviceBindingState(device)
-// Returns: .unbound, .bound, or .unknown
+// Returns: .unbound or .bound
 ```
 
 Possible values for `BLEDeviceBindingState`:
 
 - `.unbound`: Device is not bound
 - `.bound`: Device is already bound
-- `.unknown`: Unable to determine binding state
 
 Callback:
 
@@ -927,11 +930,14 @@ The binding key must be securely stored by your app. Recommended storage locatio
 
 Device binding errors are returned as `BLEDeviceBindingError`:
 
-- `.unsupportedDeviceSource(BLEDeviceSource)`: Device source does not support binding (JieLi/PNote)
+- `.unsupportedDeviceSource(BLEDeviceSource)`: Unsupported device source (`.jieLi` or native `.pnote`)
 - `.invalidBindingKeyLength`: Provided key is not exactly 16 bytes
 - `.deviceNotBound`: Attempted to verify a device that has not been bound
-- `.verificationFailed`: Provided key does not match the bound key
-- `.notConnected`: Device is not connected
+- `.bindingKeyRejected`: Device rejected the binding key
+- `.bindingVerificationFailed`: Device binding verification failed
+- `.deviceUnbindingFailed`: Device explicitly rejected unbinding
+- `.notConnected`: No current connection to the requested device
+- `.disconnected`: The connection was lost before the binding operation completed
 - `.systemError(String)`: Other system-level errors
 
 ### 17.7 Complete Binding Flow Example
@@ -998,6 +1004,63 @@ final class DeviceBindingManager {
 }
 ```
 
+### 17.8 Unbind a BLE Peripheral
+
+**Availability**: This is a newly added API pending a JieLiSdkRecorder binary release. Use a release that exposes `unbindDevice(_:)` and integrates HuanGe SDK 1.0.4 or later; updating the documentation does not add this method to an older binary. The minimum JieLiSdkRecorder release version will be specified when published. Device firmware must support HuanGe unbinding commands 20/21.
+
+```swift
+public func unbindDevice(_ device: BLEDevice) async throws
+```
+
+- **Parameter**: The currently connected `BLEDevice` with `source == .huanGe`, including PNote products connected through this stack. A stale connected-device snapshot is not a substitute for a live connection to that device.
+- **Return value**: `Void`, only after the peripheral acknowledges successful unbinding. No key, NONCE, HMAC, or raw packet is required from the application.
+- **Errors**: Throws `BLEDeviceBindingError` and also reports the error through `onError(_:errorCode:)`.
+
+After the connection is ready and the user confirms the operation, call from an asynchronous context:
+
+```swift
+do {
+    try await manager.unbindDevice(device)
+    print("Device unbound successfully")
+    // Only now apply your application's policy for retaining or deleting its stored key.
+} catch BLEDeviceBindingError.unsupportedDeviceSource(let source) {
+    print("Unbinding is not supported for:", source.rawValue)
+} catch BLEDeviceBindingError.deviceUnbindingFailed {
+    print("Device rejected unbinding. Keep the stored key.")
+} catch BLEDeviceBindingError.notConnected {
+    print("Device is not currently connected. Keep the key.")
+} catch BLEDeviceBindingError.disconnected {
+    print("Connection was lost before confirmation. Keep the key.")
+} catch {
+    print("Unbinding was not confirmed:", error.localizedDescription)
+    // Keep the key. Query binding state again once the connection is ready.
+}
+```
+
+Success also produces the existing `BLECallback` notification:
+
+```swift
+func onDeviceBindingStateChanged(_ device: BLEDevice, state: BLEDeviceBindingState) {
+    if state == .unbound {
+        print("Device is now unbound:", device.name)
+    }
+}
+```
+
+Dispatch UI updates to `MainActor`. Both the async result and the state callback can report the same successful operation; handle them without repeating business side effects.
+
+| Outcome | Thrown error | `onError` code |
+| --- | --- | --- |
+| `.jieLi` or native `.pnote` source | `.unsupportedDeviceSource(source)` | `.deviceBindingUnsupported` (1010) |
+| Device rejects the request | `.deviceUnbindingFailed` | `.deviceUnbindingFailed` (1015) |
+| No current connection to the requested device | `.notConnected` | `.systemError` (1), with details |
+| Disconnection before confirmation | `.disconnected` | `.systemError` (1), with details |
+| Timeout, invalid response, or another underlying error | `.systemError(message)` | `.systemError` (1), with details |
+
+Sending the request does not confirm success. On failure or an unknown outcome, keep the stored key and reconcile with `getDeviceBindingState(_:)` when the connection is ready. The call does not automatically authenticate, rebind, disconnect, or delete application-owned keys. After confirmed success, the application decides whether to retain or remove its key; use `bindOrVerifyDevice(_:using:)` explicitly to bind again.
+
+The Demo's device-binding section provides an unbind button with confirmation, disables repeated requests while unbinding, and retains its cached test key for rebinding. The control is enabled only for connected `.huanGe` devices. Validate success, rejection, timeout/disconnection, and subsequent rebinding on the target hardware.
+
 ## 18. Error Handling
 
 General business errors are returned through:
@@ -1019,9 +1082,12 @@ Common error constants:
 - `BLEErrorCode.opusToOggFailed`
 - `BLEErrorCode.keyTouchBehaviorUpdateFailed`
 - `BLEErrorCode.fileDownloadFailed`
-- `BLEErrorCode.bindingInvalidKeyLength`
-- `BLEErrorCode.bindingDeviceNotBound`
+- `BLEErrorCode.deviceBindingUnsupported`
+- `BLEErrorCode.invalidBindingKeyLength`
+- `BLEErrorCode.deviceNotBound`
+- `BLEErrorCode.bindingKeyRejected`
 - `BLEErrorCode.bindingVerificationFailed`
+- `BLEErrorCode.deviceUnbindingFailed` (1015)
 
 Common methods:
 
@@ -1140,3 +1206,4 @@ The SDK currently demonstrates the following capabilities:
 - OTA cancel
 - Device binding state query (HuanGe only)
 - Device binding/verification (HuanGe only)
+- Device unbinding with confirmation and retained test keys (HuanGe only)
