@@ -1,3 +1,5 @@
+![AI Recorders](/assets/recorders.webp)
+
 # JieLiSdkRecorder User Guide
 
 [中文文档](docs/README.zh-CN.md) | [Android SDK](https://github.com/caitunai/JieLi-Recorder-Android-Sdk)
