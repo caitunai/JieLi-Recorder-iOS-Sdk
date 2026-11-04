@@ -163,6 +163,44 @@ func onTimeSynced(_ device: BLEDevice, success: Bool) {
 }
 ```
 
+### 查询 BLE 外设电量
+
+请使用包含此新增接口的 JieLiSdkRecorder 发布包。先连接设备；HuanGe 设备应先完成 `bindOrVerifyDevice(_:using:)`，再发起普通控制查询。
+
+```swift
+public func queryBattery(_ device: BLEDevice) async throws -> BLEBatteryState
+```
+
+```swift
+do {
+    switch try await manager.queryBattery(device) {
+    case .percentage(let value):
+        print("剩余电量：\(value)%")
+    case .charging:
+        print("正在充电，本次应答未提供百分比")
+    }
+} catch let error as BLEBatteryQueryError {
+    print("电量查询失败：", error.localizedDescription)
+}
+```
+
+| 设备通道 | 主动查询支持情况 |
+| --- | --- |
+| `.huanGe`，包括通过 HuanGe 通道连接的 PNote 产品 | 支持，调用底层 `getBatteryState()` |
+| 原生 `.pnote` | 支持，调用底层 `getCBC()`；等待应答超过 10 秒报超时 |
+| `.jieLi` | 暂不支持，抛出 `.unsupportedDeviceSource(.jieLi)` |
+
+返回值来自设备应答，不是缓存的 `device.batteryPower`。`BLEBatteryState.percentage(UInt8)` 表示 0–100 的百分比；`.charging` 仅表示正在充电，不包含百分比。不要将充电解释为满电，也不要把旧缓存百分比当作本次测量结果。已有 `onBatteryChange(_:)` 回调继续通知电量变化并更新已发现设备快照；回调和异步返回的到达时间可能不同，更新 UI 时请切换到 `MainActor`。
+
+失败时抛出 `BLEBatteryQueryError`，同时通过 `onError(_:errorCode:)` 通知：
+
+- `.unsupportedDeviceSource(source)`：不支持此通道；回调 `.batteryQueryUnsupported`（1016）。
+- `.notConnected`：当前与指定设备没有有效连接，旧设备快照中的“已连接”状态不能替代实际连接。
+- `.disconnected`：查询完成前连接断开。
+- `.requestFailed(message)`：超时、无效应答或其它请求错误；原生 PNote 查询进行中时拒绝第二次查询。
+
+后三种错误使用回调 `.queryBatteryFailed`（1017），并附带详情。失败时不会伪造 0% 返回。Demo 已提供“查询设备电量”按钮，分别展示百分比、仅充电状态或错误信息；在 JieLi 设备上调用可验证不支持错误。
+
 ## 9. 录音控制
 
 开始、停止和查询录音状态：

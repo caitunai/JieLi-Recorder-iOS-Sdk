@@ -330,6 +330,44 @@ Callback:
 func onTimeSynced(_ device: BLEDevice, success: Bool)
 ```
 
+### Query Battery State
+
+Use a JieLiSdkRecorder release that exposes this new API. Connect the device first; HuanGe devices should complete `bindOrVerifyDevice(_:using:)` before ordinary control queries.
+
+```swift
+public func queryBattery(_ device: BLEDevice) async throws -> BLEBatteryState
+```
+
+```swift
+do {
+    switch try await manager.queryBattery(device) {
+    case .percentage(let value):
+        print("Battery: \(value)%")
+    case .charging:
+        print("Charging; this response does not include a percentage")
+    }
+} catch let error as BLEBatteryQueryError {
+    print("Battery query failed:", error.localizedDescription)
+}
+```
+
+| Device source | Explicit query |
+| --- | --- |
+| `.huanGe` (including PNote products using HuanGe) | Supported through `getBatteryState()` |
+| Native `.pnote` | Supported through `getCBC()`; a pending request times out after 10 seconds |
+| `.jieLi` | Currently unsupported; throws `.unsupportedDeviceSource(.jieLi)` |
+
+The result is a device response, not the cached `device.batteryPower` value. `BLEBatteryState.percentage(UInt8)` reports 0–100; `.charging` has no associated percentage. Do not treat charging as 100% or display a cached percentage as a new measurement. Existing `onBatteryChange(_:)` callbacks continue to report battery updates and update discovered-device snapshots. Callbacks and the async result may arrive at different times; dispatch UI updates to `MainActor`.
+
+Errors are thrown as `BLEBatteryQueryError` and also delivered to `onError(_:errorCode:)`:
+
+- `.unsupportedDeviceSource(source)`: unsupported stack; callback `.batteryQueryUnsupported` (1016).
+- `.notConnected`: no current connection to the requested device; a stale connected snapshot does not authorize a query.
+- `.disconnected`: connection lost before the query completed.
+- `.requestFailed(message)`: timeout, invalid response, or another request failure. Native PNote also rejects a second battery query while one is pending.
+
+The last three errors use callback `.queryBatteryFailed` (1017), with details. Failures do not return a fabricated zero percentage. The Demo provides a **Query Battery** button and shows percentage, charging-only state, or the failure message. A JieLi query demonstrates the unsupported-source error.
+
 ## 11. Recording Features
 
 ### 11.1 Start Recording
