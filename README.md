@@ -601,7 +601,36 @@ Default cache directory:
 
 - `Caches/jieli_sdk_download/<filename>`
 
+#### HuanGe Opus-to-Ogg Downloads
+
+With HuanGe SDK 1.0.7 or later, `downloadFile` automatically uses `importFileAllowingPacketLoss(_:resumeFromOffset:)` with offset zero for `.huanGe` devices, regardless of the `integrityMode` argument. No application API changes are required. This mode starts at zero and accepts a byte shortfall only after the device reports successful completion. The wrapper drains the actual `completion.byteCount` before closing the Ogg writer, rather than waiting for the original file size. A shortfall alone no longer triggers a download error; SDK logs record expected, received, and missing byte counts.
+
+Chunk offsets are positions in the compact received output, so the wrapper still rejects gaps in that local stream. This mode does not bypass CRC, pad missing bytes, repair Opus frames, or retransmit data. Audio may be incomplete or fail conversion. Empty audio, excess data, device rejection, cancellation, disconnection, timeout, local stream/writing errors, and conversion errors retain their existing handling. `.finish` means the device completed the tolerant transfer and the Ogg writer closed successfully, not that all source audio arrived. Progress may end below 100% before `.finish` reports 100%; `bytesCount` reflects received Opus bytes, not the expected file size or Ogg output size.
+
+`downloadRawFile` and raw-file resume default to strict `importFile(_:resumeFromOffset:)`; HuanGe callers may explicitly opt into tolerant raw imports as described below. The Demo labels HuanGe Ogg downloads as packet-loss-tolerant and disables the generic integrity selector for that device source. Validate lossy audio playback on the target hardware before relying on the output.
+
 ### 14.2 Download the Original File Bytes
+
+#### Optional HuanGe Packet-Loss-Tolerant Resume (SDK 1.0.7)
+
+New `downloadRawFile` overloads accept an explicit `integrityMode`; existing signatures are preserved and continue to use `.strict`. To allow a byte shortfall on HuanGe while resuming a verified original Opus prefix:
+
+```swift
+manager.downloadRawFile(
+    device,
+    filename: "REC0001.OPUS",
+    outputURL: rawOutputURL,
+    integrityMode: .allowPacketLossForOpusStream,
+    resumeFromOffset: verifiedDeviceOffset
+)
+```
+
+Here `rawOutputURL` is the local raw-file URL and `verifiedDeviceOffset` is a `UInt32` device-file byte offset independently matched to its saved prefix. This mode is supported only for `.huanGe`; other sources report a download error. The existing file must contain at least the requested prefix; it is truncated to that offset and the new bytes are appended. Offset zero replaces the destination.
+
+The first new chunk begins at the requested offset. `completion.byteCount` and download `bytesCount` include the saved prefix plus this request's received bytes. The wrapper waits for that accumulated count after device success, even if it is below the original size. If the device accepts completion without any new bytes, a verified nonempty prefix may remain as the result. Timeout, disconnection, rejection, writing errors and excess data still fail.
+
+**Do not derive a device offset from a previously lossy file's length.** The SDK does not know where bytes were lost and does not validate the prefix. The Demo requires an explicit offset and confirmation for a nonzero tolerant resume, saves tolerant output separately with a `.lossy` suffix, and continues to use file length automatically only for its default strict raw-download path. Opus-to-Ogg downloads still start at zero; existing Ogg files cannot be appended using an Opus byte offset.
+
 
 Use `downloadRawFile` when the file must be saved exactly as it is received from the device:
 

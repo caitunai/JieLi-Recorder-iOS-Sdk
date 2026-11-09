@@ -357,7 +357,36 @@ manager.downloadFile(device, filename: "REC0001.OPUS")
 
 默认缓存目录为 `Caches/jieli_sdk_download/<filename>`。
 
+#### HuanGe 的 Opus → Ogg 下载
+
+使用 HuanGe SDK 1.0.7 或更高版本时，`.huanGe` 设备的 `downloadFile` 自动以零偏移调用 `importFileAllowingPacketLoss(_:resumeFromOffset:)`，不受 `integrityMode` 参数影响，应用侧无需修改调用方式。该模式从零开始，仅在设备报告成功完成后接受实际接收字节数不足。封装层等待实际 `completion.byteCount` 全部写入后再关闭 Ogg 转换器，不再等待原文件大小。仅因字节数不足不会触发下载错误；SDK 日志记录预期、接收和缺失字节数。
+
+底层 chunk 的 offset 表示紧凑接收数据中的连续位置，封装层仍检查本地数据流是否缺段。此模式不跳过 CRC、不补齐缺失数据、不修复 Opus 帧，也不自动重传。音频可能不完整或无法转换。空音频、超量数据、设备拒绝、取消、断连、超时、本地流/写盘错误及转换失败仍按原有逻辑处理。`.finish` 表示设备完成容错传输且 Ogg 写入器正常关闭，不代表源音频完整；进度可能在低于 100% 时直接进入 `.finish` 的 100%。`bytesCount` 表示实际收到的 Opus 字节数，不是原文件大小或 Ogg 输出大小。
+
+`downloadRawFile` 和原始文件断点续传默认使用严格的 `importFile(_:resumeFromOffset:)`；HuanGe 可显式选择下述容错续传模式。Demo 对 HuanGe Ogg 下载明确显示“容忍丢包模式”，并禁用该设备通道的通用校验模式选择器。请在目标硬件上验证丢包音频的转换和播放效果。
+
 ### 13.2 下载原始文件
+
+#### HuanGe 原始文件可选容错续传（SDK 1.0.7）
+
+新增 `downloadRawFile` 重载可显式传入 `integrityMode`；旧方法签名保留，继续使用 `.strict`。已有与设备文件匹配的原始 Opus 前缀时，可按如下方式容错续传：
+
+```swift
+manager.downloadRawFile(
+    device,
+    filename: "REC0001.OPUS",
+    outputURL: rawOutputURL,
+    integrityMode: .allowPacketLossForOpusStream,
+    resumeFromOffset: verifiedDeviceOffset
+)
+```
+
+`rawOutputURL` 为本地原始文件 URL，`verifiedDeviceOffset` 为已独立确认与本地前缀匹配的 `UInt32` 设备文件字节偏移。仅 `.huanGe` 支持此模式；其它通道会报告下载错误。本地文件必须至少包含指定前缀，写入器先截断到该偏移，再追加本次数据；偏移为零会覆盖目标文件。
+
+首个新数据块从请求偏移开始。`completion.byteCount` 和下载回调 `bytesCount` 均包含已有前缀加本次接收量。收到设备成功应答后，封装层等待这个累计字节数，不再要求达到原文件大小；若设备成功结束但本次没有新数据，可以仅保留已验证的非空前缀作为结果。超时、断连、设备拒绝、写盘错误和超量数据仍会失败。
+
+**不能用之前已丢包文件的本地长度推导设备 offset。** SDK 不知道丢失位置，也不会验证前缀。Demo 对非零容错续传要求手动输入 offset 并确认前缀一致，容错结果使用独立 `.lossy` 后缀保存；仅默认严格原始下载继续按文件长度自动续传。Opus → Ogg 仍从零开始，不支持按 Opus 字节偏移追加已有 Ogg 文件。
+
 
 需要保存设备返回的原始文件字节时，使用 `downloadRawFile`：
 
