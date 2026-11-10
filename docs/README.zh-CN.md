@@ -319,6 +319,12 @@ func onFilesRetrieved(_ files: [BLEFile]) {
 }
 ```
 
+### HuanGe 文件列表顺序
+
+`.huanGe` 设备通过 `onFilesRetrieved(_:)` 返回的列表，会根据文件名中的创建时间降序排列。支持 `yyyyMMdd-HHmmss.opus`、`callyyyyMMdd-HHmmss.opus`、`noteyyyyMMdd-HHmmss.opus`，也识别 `.mp3` 后缀；前缀和后缀不区分大小写。例如 `note20261110-120000.opus` 会排在 `20261110-111012.opus` 前面，不受前缀字母顺序影响。
+
+解析会校验真实日期和时分秒；无法识别或日期非法的文件仍会保留，按设备返回顺序放到末尾。同一创建时间的文件保持原顺序。排序使用文件名记录的日历时间，不推测时区。Demo 直接展示 SDK 返回的顺序。
+
 ## 13. 删除和下载文件
 
 删除文件：

@@ -519,6 +519,10 @@ manager.retrieveFiles(device)
 func onFilesRetrieved(_ files: [BLEFile])
 ```
 
+For `.huanGe` devices, `onFilesRetrieved(_:)` returns files in descending order of the creation time encoded in their names. Supported names are `yyyyMMdd-HHmmss.opus`, `callyyyyMMdd-HHmmss.opus`, and `noteyyyyMMdd-HHmmss.opus`; `.mp3` is also recognized, and prefixes/extensions are case-insensitive. For example, `note20261110-120000.opus` appears before `20261110-111012.opus` regardless of its prefix.
+
+Calendar dates and clock values are validated. Files with unrecognized names or invalid dates are retained at the end in device order; equal timestamps also preserve device order. Sorting uses the wall-clock time written in the name without inferring a timezone. The Demo displays the SDK-provided order.
+
 Current primary field in `BLEFile`:
 
 - `name`
